@@ -81,195 +81,106 @@ export default function IndividualPanel({ onLoadRun, onClearRun, runResult }: In
     fileInputRef.current?.click();
   };
 
-  // Capture Map Snapshot - tiles + SVG paths drawn directly
+  // Capture Map Snapshot via html2canvas
   const generateMapSnapshot = async () => {
     setIsCapturing(true);
     setErrorMsg(null);
+    
+    // Arrays to store original values for flawless restoration
+    const modifiedStyles: { el: HTMLStyleElement; originalText: string }[] = [];
+    const disabledLinks: HTMLLinkElement[] = [];
+
     try {
+      // Find Leaflet map container element
       const mapElement = document.getElementById('map-element');
       if (!mapElement) {
-        throw new Error('Элемент карты не найден.');
+        throw new Error('Элемент карты #map-element не найден в DOM.');
       }
 
-      // Wait for all tiles to load
-      await new Promise((resolve) => setTimeout(resolve, 4000));
+      // We wait 300ms for animations and rendering to completely settle down
+      await new Promise((resolve) => setTimeout(resolve, 300));
 
-      const width = mapElement.offsetWidth;
-      const height = mapElement.offsetHeight;
-
-      // Create result canvas
-      const resultCanvas = document.createElement('canvas');
-      resultCanvas.width = width;
-      resultCanvas.height = height;
-      const ctx = resultCanvas.getContext('2d');
-
-      if (!ctx) {
-        throw new Error('Не удалось получить контекст canvas.');
+      // 1. Pre-process <style> elements (common in Vite dev mode & hot-reloads)
+      // Any style sheets using OKLCH color definitions will crash html2canvas parser.
+      // We temporarily replace 'oklch(...)' references with a neutral standard RGB value.
+      const styleElements = Array.from(document.querySelectorAll('style'));
+      for (const el of styleElements) {
+        const text = el.textContent || '';
+        if (text.includes('oklch')) {
+          modifiedStyles.push({ el, originalText: text });
+          const cleanedText = text.replace(/oklch\([^)]+\)/gi, 'rgb(100, 116, 139)');
+          el.textContent = cleanedText;
+        }
       }
 
-      // Draw white background
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, width, height);
+      // 2. Pre-process External <link> files (common in compiled production builds)
+      // Disabling non-leaflet stylesheets prevents html2canvas from downloading & parsing them,
+      // avoiding CORS and OKLCH color issues.
+      const linkElements = Array.from(document.querySelectorAll('link[rel="stylesheet"]'));
+      for (const link of linkElements) {
+        const href = (link as HTMLLinkElement).href || '';
+        // Keep Leaflet styles intact so vector lines and tiles display perfectly,
+        // but temporarily disable primary application/Tailwind stylesheets that contain modern CSS.
+        if (href && !href.includes('leaflet') && !href.includes('font') && !href.includes('google')) {
+          (link as any).disabled = true;
+          disabledLinks.push(link as HTMLLinkElement);
+        }
+      }
 
-      // Step 1: Draw tile images
-      const tileImages = Array.from(mapElement.querySelectorAll('img')) as HTMLImageElement[];
+      let canvas: HTMLCanvasElement;
+      let imgUrl = '';
       
-      tileImages.forEach((img) => {
-        try {
-          if (img.naturalWidth > 0 && img.naturalHeight > 0) {
-            const rect = img.getBoundingClientRect();
-            const mapRect = mapElement.getBoundingClientRect();
-            const x = rect.left - mapRect.left;
-            const y = rect.top - mapRect.top;
-            ctx.drawImage(img, x, y, rect.width, rect.height);
+      try {
+        // Step 1: Attempt standard high-quality snapshot with CORS allowed and ignoring markers/shadows that might taint
+        canvas = await html2canvas(mapElement, {
+          useCORS: true,
+          allowTaint: false,
+          logging: false,
+          scale: 1.5, // Enhances quality of snapshot
+          ignoreElements: (element) => {
+            return (
+              element.classList.contains('leaflet-control-zoom') ||
+              element.classList.contains('leaflet-control-attribution') ||
+              element.classList.contains('leaflet-bar') ||
+              element.classList.contains('leaflet-marker-icon') ||
+              element.classList.contains('leaflet-marker-shadow')
+            );
           }
-        } catch (e) {
-          // Skip CORS errors
-        }
-      });
-
-      // Step 2: Draw SVG paths/lines directly (routes, bbox)
-      const svgs = Array.from(mapElement.querySelectorAll('svg'));
-      console.log('Found SVG elements:', svgs.length);
-      
-      svgs.forEach((svg, svgIndex) => {
-        try {
-          // Get SVG position
-          const svgRect = svg.getBoundingClientRect();
-          const mapRect = mapElement.getBoundingClientRect();
-          const offsetX = svgRect.left - mapRect.left;
-          const offsetY = svgRect.top - mapRect.top;
-          
-          console.log(`SVG ${svgIndex}: position (${offsetX}, ${offsetY}), size (${svgRect.width}, ${svgRect.height})`);
-
-          // Draw all paths from SVG
-          const paths = svg.querySelectorAll('path');
-          console.log(`SVG ${svgIndex} has ${paths.length} paths`);
-          
-          paths.forEach((path, pathIndex) => {
-            try {
-              const d = path.getAttribute('d');
-              const stroke = path.getAttribute('stroke') || path.style.stroke || '#000';
-              const strokeWidth = parseFloat(path.getAttribute('stroke-width') || path.style.strokeWidth || '1');
-              const fill = path.getAttribute('fill') || path.style.fill;
-              const fillOpacity = parseFloat(path.getAttribute('fill-opacity') || path.style.fillOpacity || '0');
-
-              console.log(`Path ${pathIndex}: d="${d?.substring(0, 50)}...", stroke=${stroke}, width=${strokeWidth}`);
-
-              if (!d) return;
-
-              // Set stroke style
-              ctx.strokeStyle = stroke;
-              ctx.lineWidth = strokeWidth;
-              
-              // Set fill style if needed
-              if (fill && fill !== 'none' && fillOpacity > 0) {
-                ctx.fillStyle = fill;
-                ctx.globalAlpha = fillOpacity;
-              }
-
-              // Parse and draw the path
-              const pathCommands = d.match(/[a-zA-Z][^a-zA-Z]*/g) || [];
-              let x = 0, y = 0;
-              let firstPoint = true;
-
-              ctx.beginPath();
-
-              pathCommands.forEach((command) => {
-                const cmd = command.charAt(0);
-                const args = command
-                  .slice(1)
-                  .trim()
-                  .split(/[\s,]+/)
-                  .map(Number)
-                  .filter(n => !isNaN(n));
-
-                switch (cmd) {
-                  case 'M': // moveto
-                    x = offsetX + args[0];
-                    y = offsetY + args[1];
-                    ctx.moveTo(x, y);
-                    firstPoint = true;
-                    break;
-                  case 'L': // lineto
-                    x = offsetX + args[0];
-                    y = offsetY + args[1];
-                    ctx.lineTo(x, y);
-                    break;
-                  case 'H': // horizontal line
-                    x = offsetX + args[0];
-                    ctx.lineTo(x, y);
-                    break;
-                  case 'V': // vertical line
-                    y = offsetY + args[0];
-                    ctx.lineTo(x, y);
-                    break;
-                  case 'Z': // close path
-                    ctx.closePath();
-                    break;
-                  case 'C': // cubic bezier
-                    for (let i = 0; i < args.length; i += 6) {
-                      ctx.bezierCurveTo(
-                        offsetX + args[i],
-                        offsetY + args[i + 1],
-                        offsetX + args[i + 2],
-                        offsetY + args[i + 3],
-                        offsetX + args[i + 4],
-                        offsetY + args[i + 5]
-                      );
-                    }
-                    break;
-                }
-              });
-
-              ctx.stroke();
-              if (fill && fill !== 'none' && fillOpacity > 0) {
-                ctx.fill();
-              }
-              ctx.globalAlpha = 1;
-            } catch (err) {
-              // Skip problematic paths
-            }
-          });
-
-          // Draw all circles/markers
-          const circles = svg.querySelectorAll('circle');
-          circles.forEach((circle) => {
-            try {
-              const cx = parseFloat(circle.getAttribute('cx') || '0');
-              const cy = parseFloat(circle.getAttribute('cy') || '0');
-              const r = parseFloat(circle.getAttribute('r') || '0');
-              const fill = circle.getAttribute('fill') || circle.style.fill || '#000';
-              const stroke = circle.getAttribute('stroke') || circle.style.stroke;
-
-              ctx.fillStyle = fill;
-              ctx.beginPath();
-              ctx.arc(offsetX + cx, offsetY + cy, r, 0, Math.PI * 2);
-              ctx.fill();
-
-              if (stroke) {
-                ctx.strokeStyle = stroke;
-                ctx.lineWidth = parseFloat(circle.getAttribute('stroke-width') || '1');
-                ctx.stroke();
-              }
-            } catch (err) {
-              // Skip problematic circles
-            }
-          });
-        } catch (err) {
-          console.error('Error drawing SVG:', err);
-        }
-      });
-
-      const imgUrl = resultCanvas.toDataURL('image/png');
-      if (!imgUrl || imgUrl.length < 1000) {
-        throw new Error('Некорректное изображение.');
+        });
+        imgUrl = canvas.toDataURL('image/png');
+      } catch (firstErr) {
+        console.warn('First snapshot attempt or toDataURL conversion failed, initiating robust vector fallback mode...', firstErr);
+        // Step 2: Fallback mode. If Tiles are blocked by browser sandbox/cache conflicts, we isolate them completely.
+        // We render only the vector route layer canvas, omitting all tile images so we guaranteed-by-design bypass any CORS/Taint error
+        canvas = await html2canvas(mapElement, {
+          useCORS: false,
+          allowTaint: true,
+          logging: false,
+          scale: 1.5,
+          ignoreElements: (element) => {
+            return (
+              element.classList.contains('leaflet-control-zoom') ||
+              element.classList.contains('leaflet-control-attribution') ||
+              element.classList.contains('leaflet-bar') ||
+              element.tagName.toLowerCase() === 'img' // removes tiles & taints completely to safeguard export
+            );
+          }
+        });
+        imgUrl = canvas.toDataURL('image/png');
       }
+
       setScreenshotUrl(imgUrl);
     } catch (err: any) {
-      console.error('Screenshot error:', err);
-      setErrorMsg(`Ошибка: ${err.message}`);
+      console.error('Snapshot failed on all fallback stages:', err);
+      setErrorMsg('Не удалось сформировать изображение карты. Ошибка CORS или отрисовки Canvas.');
     } finally {
+      // Synchronously restore original style sheets so user interface layout returns to pristine state instantly
+      for (const item of modifiedStyles) {
+        item.el.textContent = item.originalText;
+      }
+      for (const link of disabledLinks) {
+        (link as any).disabled = false;
+      }
       setIsCapturing(false);
     }
   };
