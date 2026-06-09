@@ -324,7 +324,7 @@ export default function App() {
 
           {/* 3. DSTU Footer for clean dashboard spacing */}
           <div className="p-4 border-t border-slate-100 bg-slate-50 text-[10px] text-slate-400 shrink-0 font-medium">
-            <p>© 2026 GIS Lab • DSTU University</p>
+            <p>© 2026 GIS Lab • VLSU University</p>
             <p>Rostov-on-Don, Russia</p>
           </div>
         </section>
