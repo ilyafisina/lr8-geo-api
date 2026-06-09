@@ -86,9 +86,8 @@ export default function IndividualPanel({ onLoadRun, onClearRun, runResult }: In
     setIsCapturing(true);
     setErrorMsg(null);
     
-    // Arrays to store original values for flawless restoration
-    const modifiedStyles: { el: HTMLStyleElement; originalText: string }[] = [];
-    const disabledLinks: HTMLLinkElement[] = [];
+    // Track clean-up actions to restore pristine DOM styles after snapshotting completes
+    const cleanups: (() => void)[] = [];
 
     try {
       // Find Leaflet map container element
@@ -100,30 +99,64 @@ export default function IndividualPanel({ onLoadRun, onClearRun, runResult }: In
       // We wait 300ms for animations and rendering to completely settle down
       await new Promise((resolve) => setTimeout(resolve, 300));
 
-      // 1. Pre-process <style> elements (common in Vite dev mode & hot-reloads)
-      // Any style sheets using OKLCH color definitions will crash html2canvas parser.
-      // We temporarily replace 'oklch(...)' references with a neutral standard RGB value.
+      // 1. Process and clean style and link elements to filter out 'oklch' color functions.
+      // This allows html2canvas to interpret Leaflet layouts perfectly (preventing tile displacement / mosaic defects)
+      // while avoiding modern CSS syntax parsing crashes entirely.
       const styleElements = Array.from(document.querySelectorAll('style'));
-      for (const el of styleElements) {
-        const text = el.textContent || '';
+      const linkElements = Array.from(document.querySelectorAll('link[rel="stylesheet"]'));
+
+      // Clean inline `<style>` blocks (commonly populated during dev hot reloading)
+      for (const style of styleElements) {
+        const text = style.textContent || '';
         if (text.includes('oklch')) {
-          modifiedStyles.push({ el, originalText: text });
           const cleanedText = text.replace(/oklch\([^)]+\)/gi, 'rgb(100, 116, 139)');
-          el.textContent = cleanedText;
+          style.textContent = cleanedText;
+          cleanups.push(() => {
+            style.textContent = text;
+          });
         }
       }
 
-      // 2. Pre-process External <link> files (common in compiled production builds)
-      // Disabling non-leaflet stylesheets prevents html2canvas from downloading & parsing them,
-      // avoiding CORS and OKLCH color issues.
-      const linkElements = Array.from(document.querySelectorAll('link[rel="stylesheet"]'));
+      // Clean compiled `<link rel="stylesheet">` sheets (commonly populated in built/deployed runs)
       for (const link of linkElements) {
         const href = (link as HTMLLinkElement).href || '';
-        // Keep Leaflet styles intact so vector lines and tiles display perfectly,
-        // but temporarily disable primary application/Tailwind stylesheets that contain modern CSS.
-        if (href && !href.includes('leaflet') && !href.includes('font') && !href.includes('google')) {
-          (link as any).disabled = true;
-          disabledLinks.push(link as HTMLLinkElement);
+        if (href) {
+          let isSameOrigin = false;
+          try {
+            const url = new URL(href, window.location.href);
+            isSameOrigin = url.origin === window.location.origin;
+          } catch (e) {
+            // ignore parsing failures
+          }
+
+          if (isSameOrigin) {
+            try {
+              const response = await fetch(href);
+              const originalCSS = await response.text();
+              if (originalCSS.includes('oklch')) {
+                // Replace all oklch tags with an rgb alternative standard fallback
+                const cleanedCSS = originalCSS.replace(/oklch\([^)]+\)/gi, 'rgb(100, 116, 139)');
+                
+                // Mount a temporary style tag with cleaned rules so leaflet layout and positions stay active
+                const tempStyle = document.createElement('style');
+                tempStyle.textContent = cleanedCSS;
+                document.head.appendChild(tempStyle);
+
+                // Disable the original link that contains oklch rules to prevent html2canvas parsing crashes
+                const originalDisabled = (link as any).disabled;
+                (link as any).disabled = true;
+
+                cleanups.push(() => {
+                  if (tempStyle.parentNode) {
+                    tempStyle.parentNode.removeChild(tempStyle);
+                  }
+                  (link as any).disabled = originalDisabled;
+                });
+              }
+            } catch (err) {
+              console.warn('Failed to sanitize link stylesheet in-place:', href, err);
+            }
+          }
         }
       }
 
@@ -151,7 +184,6 @@ export default function IndividualPanel({ onLoadRun, onClearRun, runResult }: In
       } catch (firstErr) {
         console.warn('First snapshot attempt or toDataURL conversion failed, initiating robust vector fallback mode...', firstErr);
         // Step 2: Fallback mode. If Tiles are blocked by browser sandbox/cache conflicts, we isolate them completely.
-        // We render only the vector route layer canvas, omitting all tile images so we guaranteed-by-design bypass any CORS/Taint error
         canvas = await html2canvas(mapElement, {
           useCORS: false,
           allowTaint: true,
@@ -174,12 +206,13 @@ export default function IndividualPanel({ onLoadRun, onClearRun, runResult }: In
       console.error('Snapshot failed on all fallback stages:', err);
       setErrorMsg('Не удалось сформировать изображение карты. Ошибка CORS или отрисовки Canvas.');
     } finally {
-      // Synchronously restore original style sheets so user interface layout returns to pristine state instantly
-      for (const item of modifiedStyles) {
-        item.el.textContent = item.originalText;
-      }
-      for (const link of disabledLinks) {
-        (link as any).disabled = false;
+      // Flawlessly restore style and link rules to their original versions instantly
+      for (const cleanupAction of cleanups) {
+        try {
+          cleanupAction();
+        } catch (restoreErr) {
+          console.warn('Error during style cleanups restoration:', restoreErr);
+        }
       }
       setIsCapturing(false);
     }
