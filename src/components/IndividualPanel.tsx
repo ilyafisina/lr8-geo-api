@@ -520,7 +520,7 @@ export default function IndividualPanel({ onLoadRun, onClearRun, runResult }: In
                     onClick={generateMapSnapshot}
                     disabled={isCapturing}
                     className="px-3 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-lg text-xs transition-colors"
-                    title="Обновить снимок"
+                    title="Обновить снимокк"
                   >
                     <RefreshCw className={`h-4 w-4 ${isCapturing ? 'animate-spin' : ''}`} />
                   </button>
