@@ -1,0 +1,6 @@
+{
+  "name": "ГИС Лабораторная Работа",
+  "description": "Веб-приложение для лабораторной работы по ГИС технологиям в Ростове-на-Дону",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
