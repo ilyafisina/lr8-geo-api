@@ -1,0 +1,64 @@
+{
+  "hash": "f844fc57",
+  "configHash": "868f64da",
+  "lockfileHash": "405fb4e2",
+  "browserHash": "5da43961",
+  "optimized": {
+    "react/jsx-dev-runtime": {
+      "src": "../../node_modules/react/jsx-dev-runtime.js",
+      "file": "react_jsx-dev-runtime.js",
+      "fileHash": "05d8b832",
+      "needsInterop": true
+    },
+    "react": {
+      "src": "../../node_modules/react/index.js",
+      "file": "react.js",
+      "fileHash": "54092639",
+      "needsInterop": true
+    },
+    "react-dom/client": {
+      "src": "../../node_modules/react-dom/client.js",
+      "file": "react-dom_client.js",
+      "fileHash": "28e1d0fb",
+      "needsInterop": true
+    },
+    "lucide-react": {
+      "src": "../../node_modules/lucide-react/dist/esm/lucide-react.js",
+      "file": "lucide-react.js",
+      "fileHash": "3286b625",
+      "needsInterop": false
+    },
+    "@turf/turf": {
+      "src": "../../node_modules/@turf/turf/dist/esm/index.js",
+      "file": "@turf_turf.js",
+      "fileHash": "aec524e0",
+      "needsInterop": false
+    },
+    "ngeohash": {
+      "src": "../../node_modules/ngeohash/main.js",
+      "file": "ngeohash.js",
+      "fileHash": "afb54a9f",
+      "needsInterop": true
+    },
+    "leaflet": {
+      "src": "../../node_modules/leaflet/dist/leaflet-src.js",
+      "file": "leaflet.js",
+      "fileHash": "254ac708",
+      "needsInterop": true
+    },
+    "html2canvas": {
+      "src": "../../node_modules/html2canvas/dist/html2canvas.esm.js",
+      "file": "html2canvas.js",
+      "fileHash": "db682985",
+      "needsInterop": false
+    }
+  },
+  "chunks": {
+    "chunk-G7VJPM6X": {
+      "file": "chunk-G7VJPM6X.js"
+    },
+    "chunk-EWTE5DHJ": {
+      "file": "chunk-EWTE5DHJ.js"
+    }
+  }
+}
